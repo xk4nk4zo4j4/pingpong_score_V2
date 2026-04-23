@@ -211,6 +211,25 @@ html, body {
   background: #3b82f6; color: #fff; border: none; border-radius: 0.75rem; cursor: pointer;
 }
 #btn-new-game:hover { background: #2563eb; }
+
+/* Rotate prompt overlay */
+#rotate-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.95);
+  display: none;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 1.2rem;
+}
+#rotate-overlay.show { display: flex; }
+#rotate-icon { font-size: 4rem; animation: rotate-hint 1.5s ease-in-out infinite; }
+@keyframes rotate-hint {
+  0%   { transform: rotate(0deg); }
+  40%  { transform: rotate(90deg); }
+  60%  { transform: rotate(90deg); }
+  100% { transform: rotate(0deg); }
+}
+#rotate-text { font-size: 1.1rem; font-weight: 700; color: #fff; text-align: center; }
+#rotate-sub  { font-size: 0.8rem; color: #6b7280; }
 </style>
 </head>
 <body>
@@ -413,6 +432,7 @@ function speakScore(ls,rs){
 function startGame(){
   // ← user gesture: unlock audio here
   unlockAudio();
+  lockOrientation();
   st=newState();
   document.getElementById('setup-modal').style.display='none';
   syncVoiceHUD();
@@ -607,6 +627,34 @@ function initCamera(){
     document.getElementById('game-label').textContent='鏡頭存取失敗';
   });
 }
+
+/* ── ORIENTATION LOCK ── */
+function lockOrientation() {
+  // Android / Chrome: use Screen Orientation API
+  if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock('landscape').catch(() => {});
+  }
+}
+
+function checkOrientation() {
+  const isPortrait = window.innerHeight > window.innerWidth;
+  const overlay = document.getElementById('rotate-overlay');
+  overlay.classList.toggle('show', isPortrait);
+}
+
+// Run on start and on every resize/orientationchange
+window.addEventListener('resize', checkOrientation);
+window.addEventListener('orientationchange', checkOrientation);
+// Check immediately when page loads
+checkOrientation();
+
 </script>
+
+<div id="rotate-overlay">
+  <div id="rotate-icon">📱</div>
+  <div id="rotate-text">請將手機轉為橫放</div>
+  <div id="rotate-sub">This app is designed for landscape mode</div>
+</div>
+
 </body>
 </html>
