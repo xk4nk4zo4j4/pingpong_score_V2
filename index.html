@@ -340,26 +340,18 @@ function unlockAudio() {
   if (audioCtx.state === 'suspended') {
     audioCtx.resume();
   }
-  if (!speechUnlocked && window.speechSynthesis) {
-    // iOS requires voices to be loaded first
-    const doUnlock = () => {
-      const silent = new SpeechSynthesisUtterance(' ');
-      silent.volume = 0;
-      silent.lang = 'en-US';
-      silent.rate = 0.9;
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(silent);
-      speechUnlocked = true;
-    };
-    // If voices already loaded, unlock immediately; otherwise wait
-    const voices = window.speechSynthesis.getVoices();
-    if (voices.length > 0) {
-      doUnlock();
-    } else {
-      window.speechSynthesis.addEventListener('voiceschanged', doUnlock, { once: true });
-      // Fallback: try anyway after 500ms in case voiceschanged never fires
-      setTimeout(() => { if (!speechUnlocked) doUnlock(); }, 500);
-    }
+  // Synchronous warm-up: iOS needs speak() called at least once during a
+  // user gesture before it allows subsequent auto calls.
+  // Fire TWO utterances: a silent one to unlock, then a real one to warm up
+  // the synthesis engine. Both must be synchronous within the gesture handler.
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+    const silent = new SpeechSynthesisUtterance(' ');
+    silent.volume = 0;
+    silent.lang = 'en-US';
+    silent.rate = 0.9;
+    window.speechSynthesis.speak(silent);
+    speechUnlocked = true;
   }
 }
 
@@ -381,11 +373,19 @@ function toggleModalVoice(){
   syncVoiceHUD();
 }
 function toggleVoice(){
-  // toggling from HUD also counts as a user gesture → unlock
-  unlockAudio();
   cfg.voice=!cfg.voice;
   document.getElementById('modal-voice-toggle').classList.toggle('sel',cfg.voice);
   syncVoiceHUD();
+  // If turning ON: warm up synchronously right now inside the tap gesture
+  if(cfg.voice && window.speechSynthesis){
+    window.speechSynthesis.cancel();
+    const warmup = new SpeechSynthesisUtterance(' ');
+    warmup.volume = 0;
+    warmup.lang = 'en-US';
+    warmup.rate = 0.9;
+    window.speechSynthesis.speak(warmup);
+    speechUnlocked = true;
+  }
 }
 function syncVoiceHUD(){
   const el=document.getElementById('voice-toggle');
@@ -452,6 +452,7 @@ function undoPoint(){
 function resetGame(){
   window.speechSynthesis&&window.speechSynthesis.cancel();
   speechUnlocked=false;
+  audioCtx=null;
   document.getElementById('winner-overlay').classList.remove('show');
   st=newState();
   document.getElementById('setup-modal').style.display='flex';
