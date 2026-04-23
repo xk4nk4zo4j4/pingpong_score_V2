@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>桌球計分</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  width: 100%; height: 100%;
+  background: #000; overflow: hidden;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+#video {
+  position: fixed; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  filter: brightness(0.35);
+  z-index: 0;
+}
+#canvas-overlay {
+  position: fixed; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none; z-index: 1;
+}
+#roi-canvas { display: none; }
+
+#scores {
+  position: fixed; inset: 0;
+  display: flex; z-index: 10; pointer-events: none;
+}
+.half {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+#scores::after {
+  content: '';
+  position: absolute;
+  left: 50%; top: 10%; height: 80%;
+  width: 1px; background: rgba(255,255,255,0.12);
+  transform: translateX(-50%);
+}
+.score-num {
+  font-size: clamp(6rem, 22vw, 18rem);
+  font-weight: 900; line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em; user-select: none;
+}
+#left-score  { color: #f59e0b; text-shadow: 0 0 60px rgba(245,158,11,0.5); }
+#right-score { color: #60a5fa; text-shadow: 0 0 60px rgba(96,165,250,0.5); }
+.score-num.bump { animation: bump 0.35s cubic-bezier(0.34,1.56,0.64,1); }
+@keyframes bump { 0%{transform:scale(1)} 50%{transform:scale(1.2)} 100%{transform:scale(1)} }
+.half.flash-left  { animation: flash-gold 0.5s ease-out; }
+.half.flash-right { animation: flash-blue 0.5s ease-out; }
+@keyframes flash-gold { 0%{background:rgba(245,158,11,0.2)} 100%{background:transparent} }
+@keyframes flash-blue { 0%{background:rgba(96,165,250,0.2)}  100%{background:transparent} }
+.cooldown-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 4px; background: #a855f7;
+  width: 0%; opacity: 0; border-radius: 2px;
+}
+
+/* ROI zone overlay — show the 1/3 detection boxes */
+#roi-box-left, #roi-box-right {
+  position: fixed;
+  top: 20%; height: 55%; /* vertical crop: 20%–75% */
+  width: calc(100% / 3);
+  border: 1px dashed rgba(255,255,255,0.12);
+  border-radius: 4px;
+  pointer-events: none; z-index: 2;
+}
+#roi-box-left  { left: 0; }
+#roi-box-right { right: 0; }
+
+#gesture-hint {
+  position: fixed; z-index: 30;
+  top: 50%; left: 50%;
+  transform: translate(-50%,-50%) scale(0.8);
+  background: rgba(10,10,20,0.85);
+  border: 1px solid #a855f7; border-radius: 1rem;
+  padding: 1.25rem 2.5rem; text-align: center;
+  pointer-events: none; opacity: 0; transition: all 0.25s ease;
+  box-shadow: 0 0 40px rgba(168,85,247,0.4);
+}
+#gesture-hint.show { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+#gesture-hint-text { font-size: 1.4rem; font-weight: 700; color: #a855f7; }
+
+#hud {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.6rem 1.25rem;
+  background: rgba(0,0,0,0.5); backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  pointer-events: all;
+}
+.hud-info { display: flex; align-items: center; gap: 0.75rem; }
+#game-label { font-size: 0.8rem; font-weight: 700; color: rgba(255,255,255,0.5); letter-spacing: 0.1em; text-transform: uppercase; }
+.set-pip-row { display: flex; gap: 0.3rem; }
+.set-pip { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,0.2); }
+.set-pip.left  { background: #f59e0b; border-color: #f59e0b; }
+.set-pip.right { background: #60a5fa; border-color: #60a5fa; }
+.hud-btns { display: flex; gap: 0.4rem; }
+.hud-btn {
+  padding: 0.2rem 0.65rem; border-radius: 0.4rem;
+  font-size: 0.72rem; font-weight: 600;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.6);
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.hud-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+.hud-btn.primary { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.hud-btn.primary:hover { background: #2563eb; }
+#cam-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #ef4444; display: inline-block;
+}
+#cam-dot.on { background: #22c55e; animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+/* detection badges */
+#badge-left, #badge-right {
+  position: fixed; bottom: 0.5rem; z-index: 25;
+  font-size: 0.6rem; padding: 0.15rem 0.5rem;
+  border-radius: 9999px; pointer-events: none;
+  background: rgba(0,0,0,0.6); border: 1px solid;
+  transition: all 0.2s;
+}
+#badge-left  { left: 0.75rem;  color: #f59e0b; border-color: rgba(245,158,11,0.3); }
+#badge-right { right: 0.75rem; color: #60a5fa; border-color: rgba(96,165,250,0.3); }
+#badge-left.active  { background: rgba(245,158,11,0.2); border-color: #f59e0b; }
+#badge-right.active { background: rgba(96,165,250,0.2); border-color: #60a5fa; }
+
+/* Setup modal */
+#setup-modal {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,0.92);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-box {
+  background: #111827; border: 1px solid #2d3f52; border-radius: 1rem;
+  padding: 2rem; width: min(420px,90vw);
+  display: flex; flex-direction: column; gap: 1.2rem; color: #e8f0fe;
+}
+.modal-title { font-size: 1.4rem; font-weight: 800; display: flex; align-items: center; gap: 0.6rem; }
+.modal-label { font-size: 0.72rem; font-weight: 700; color: #8ba3c0; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.4rem; }
+.opt-row { display: flex; gap: 0.4rem; }
+.opt-btn {
+  flex: 1; padding: 0.55rem 0.5rem; border-radius: 0.5rem;
+  border: 1.5px solid #2d3f52; background: #1e2d3d; color: #8ba3c0;
+  font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: all 0.15s; text-align: center;
+}
+.opt-btn:hover { border-color: #3b82f6; color: #e8f0fe; }
+.opt-btn.sel { border-color: #3b82f6; background: rgba(59,130,246,0.15); color: #e8f0fe; }
+.slider-row { display: flex; align-items: center; gap: 0.6rem; }
+.slider-row input[type=range] { flex: 1; accent-color: #3b82f6; }
+.slider-val { font-size: 0.82rem; color: #8ba3c0; min-width: 2ch; }
+.modal-note { font-size: 0.68rem; color: #4a6480; }
+.start-btn {
+  width: 100%; padding: 0.9rem; border-radius: 0.75rem;
+  background: #3b82f6; color: #fff; font-size: 0.95rem; font-weight: 800; border: none; cursor: pointer;
+}
+.start-btn:hover { background: #2563eb; }
+
+/* Winner */
+#winner-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0,0,0,0.88);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1.2rem; opacity: 0; pointer-events: none; transition: opacity 0.5s;
+}
+#winner-overlay.show { opacity: 1; pointer-events: all; }
+#winner-emoji { font-size: 5rem; }
+#winner-text  { font-size: clamp(1.5rem,4vw,2.5rem); font-weight: 900; color: #fff; }
+#winner-sub   { font-size: 1rem; color: #8ba3c0; }
+#btn-new-game {
+  margin-top: 0.5rem; padding: 0.7rem 2rem;
+  font-size: 0.95rem; font-weight: 700;
+  background: #3b82f6; color: #fff; border: none; border-radius: 0.75rem; cursor: pointer;
+}
+#btn-new-game:hover { background: #2563eb; }
+</style>
+</head>
+<body>
+
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas-overlay"></canvas>
+<canvas id="roi-canvas"></canvas>
+
+<!-- ROI zone visual guides -->
+<div id="roi-box-left"></div>
+<div id="roi-box-right"></div>
+
+<div id="scores">
+  <div class="half" id="left-half">
+    <div class="score-num" id="left-score">0</div>
+    <div class="cooldown-bar" id="cd-left"></div>
+  </div>
+  <div class="half" id="right-half">
+    <div class="score-num" id="right-score">0</div>
+    <div class="cooldown-bar" id="cd-right"></div>
+  </div>
+</div>
+
+<div id="hud">
+  <div class="hud-info">
+    <span id="cam-dot"></span>
+    <span id="game-label">第 1 局</span>
+    <div class="set-pip-row" id="sets-display"></div>
+  </div>
+  <div class="hud-btns">
+    <button class="hud-btn" onclick="undoPoint()">↩ 撤銷</button>
+    <button class="hud-btn" onclick="resetGame()">重置</button>
+    <button class="hud-btn primary" onclick="goFullscreen()">⛶ 全螢幕</button>
+  </div>
+</div>
+
+<div id="badge-left">✌️ 左偵測中</div>
+<div id="badge-right">✌️ 右偵測中</div>
+
+<div id="gesture-hint">
+  <div id="gesture-hint-text">+1</div>
+</div>
+
+<div id="winner-overlay">
+  <div id="winner-emoji">🏆</div>
+  <div id="winner-text"></div>
+  <div id="winner-sub"></div>
+  <button id="btn-new-game" onclick="resetGame()">🔄 新比賽</button>
+</div>
+
+<div id="setup-modal">
+  <div class="modal-box">
+    <div class="modal-title">🏓 桌球計分</div>
+    <div>
+      <div class="modal-label">比賽模式</div>
+      <div class="opt-row">
+        <button class="opt-btn sel" data-mode="singles" onclick="pick(this,'mode','singles')">單打</button>
+        <button class="opt-btn" data-mode="doubles" onclick="pick(this,'mode','doubles')">雙打</button>
+      </div>
+    </div>
+    <div>
+      <div class="modal-label">局數</div>
+      <div class="opt-row">
+        <button class="opt-btn" data-sets="3" onclick="pick(this,'sets',3)">三局兩勝</button>
+        <button class="opt-btn sel" data-sets="5" onclick="pick(this,'sets',5)">五局三勝</button>
+        <button class="opt-btn" data-sets="7" onclick="pick(this,'sets',7)">七局四勝</button>
+      </div>
+    </div>
+    <div>
+      <div class="modal-label">每局分數</div>
+      <div class="opt-row">
+        <button class="opt-btn sel" data-pts="11" onclick="pick(this,'pts',11)">11 分制</button>
+        <button class="opt-btn" data-pts="21" onclick="pick(this,'pts',21)">21 分制</button>
+      </div>
+    </div>
+    <div>
+      <div class="modal-label">手勢靈敏度（連續幀數）</div>
+      <div class="slider-row">
+        <span style="font-size:.72rem;color:#4a6480">低</span>
+        <input type="range" id="sens-slider" min="1" max="5" value="2">
+        <span style="font-size:.72rem;color:#4a6480">高</span>
+        <span class="slider-val" id="sens-val">2</span>
+      </div>
+      <div class="modal-note">偵測到 ✌️ 後計分 +1，冷卻 3 秒</div>
+    </div>
+    <button class="start-btn" onclick="startGame()">📷 開啟鏡頭並開始</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+const WIN_SETS={3:2,5:3,7:4};
+const COOLDOWN=3000;
+let cfg={mode:'singles',maxSets:5,pts:11,sens:2};
+let st=newState();
+function newState(){
+  return{ls:0,rs:0,lSets:0,rSets:0,set:1,serveLeft:true,history:[],cdL:false,cdR:false,over:false};
+}
+
+document.getElementById('sens-slider').addEventListener('input',function(){
+  cfg.sens=+this.value;
+  document.getElementById('sens-val').textContent=this.value;
+});
+function pick(el,group,val){
+  document.querySelectorAll(`[data-${group}]`).forEach(b=>b.classList.remove('sel'));
+  el.classList.add('sel');
+  if(group==='mode') cfg.mode=val;
+  if(group==='sets') cfg.maxSets=+val;
+  if(group==='pts')  cfg.pts=+val;
+}
+
+function startGame(){
+  st=newState();
+  document.getElementById('setup-modal').style.display='none';
+  render();
+  initCamera();
+}
+
+function addPoint(side){
+  if(st.over) return;
+  if(side==='left'&&st.cdL) return;
+  if(side==='right'&&st.cdR) return;
+  st.history.push(JSON.parse(JSON.stringify(st)));
+  if(side==='left') st.ls++; else st.rs++;
+  checkSet(); render(); animateScore(side); showHint(side); cooldown(side);
+}
+function checkSet(){
+  const p=cfg.pts,need=WIN_SETS[cfg.maxSets];
+  let w=null;
+  if(st.ls>=p&&st.ls-st.rs>=2) w='left';
+  else if(st.rs>=p&&st.rs-st.ls>=2) w='right';
+  if(w){
+    if(w==='left') st.lSets++; else st.rSets++;
+    st.ls=0;st.rs=0;st.set++;st.serveLeft=!st.serveLeft;
+    if(st.lSets>=need||st.rSets>=need){st.over=true;setTimeout(()=>showWinner(w),600);}
+  }
+}
+function undoPoint(){
+  if(!st.history.length) return;
+  const prev=st.history.pop(),h=st.history;
+  Object.assign(st,prev);st.history=h;render();
+}
+function resetGame(){
+  document.getElementById('winner-overlay').classList.remove('show');
+  st=newState();
+  document.getElementById('setup-modal').style.display='flex';
+  if(mpCam) mpCam.stop();
+}
+function render(){
+  document.getElementById('left-score').textContent=st.ls;
+  document.getElementById('right-score').textContent=st.rs;
+  document.getElementById('game-label').textContent=`第 ${st.set} 局`;
+  const c=document.getElementById('sets-display');c.innerHTML='';
+  for(let i=0;i<st.lSets;i++){const d=document.createElement('div');d.className='set-pip left';c.appendChild(d);}
+  for(let i=0;i<st.rSets;i++){const d=document.createElement('div');d.className='set-pip right';c.appendChild(d);}
+}
+function animateScore(side){
+  const el=document.getElementById(side==='left'?'left-score':'right-score');
+  el.classList.remove('bump');void el.offsetWidth;el.classList.add('bump');
+  const half=document.getElementById(side==='left'?'left-half':'right-half');
+  half.classList.remove('flash-left','flash-right');void half.offsetWidth;
+  half.classList.add(side==='left'?'flash-left':'flash-right');
+}
+function showHint(side){
+  document.getElementById('gesture-hint-text').textContent=(side==='left'?'🟡':'🔵')+' +1';
+  const h=document.getElementById('gesture-hint');
+  h.classList.add('show');setTimeout(()=>h.classList.remove('show'),1200);
+}
+function showWinner(side){
+  document.getElementById('winner-text').textContent=(side==='left'?'🟡 左側':'🔵 右側')+' 獲勝！';
+  document.getElementById('winner-sub').textContent=`比分 ${st.lSets} : ${st.rSets}`;
+  document.getElementById('winner-overlay').classList.add('show');
+}
+function cooldown(side){
+  const key=side==='left'?'cdL':'cdR';
+  const bar=document.getElementById(side==='left'?'cd-left':'cd-right');
+  st[key]=true;
+  bar.style.opacity='1';bar.style.transition='none';bar.style.width='100%';
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    bar.style.transition=`width ${COOLDOWN}ms linear`;bar.style.width='0%';
+  }));
+  setTimeout(()=>{st[key]=false;bar.style.opacity='0';},COOLDOWN);
+}
+function goFullscreen(){
+  const el=document.documentElement;
+  if(el.requestFullscreen) el.requestFullscreen();
+  else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+}
+document.addEventListener('fullscreenchange',()=>{
+  document.querySelector('.hud-btn.primary').textContent=
+    document.fullscreenElement?'⛶ 離開全螢幕':'⛶ 全螢幕';
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft') addPoint('left');
+  if(e.key==='ArrowRight') addPoint('right');
+  if(e.key==='z'||e.key==='Z') undoPoint();
+  if(e.key==='f'||e.key==='F') goFullscreen();
+});
+
+/* ── ROI CONFIG ──
+   左側玩家站在畫面 screen-left，對應 raw video 右 1/3 (x: 2/3..1)
+   右側玩家站在畫面 screen-right，對應 raw video 左 1/3 (x: 0..1/3)
+   垂直只取 20%~75%（人體舉手範圍，排除天花板和地板）
+*/
+const ROI_W=640, ROI_H=640;
+const V_TOP=0.20, V_BOT=0.75; // vertical crop 20%–75%
+
+let mpCam=null, handsLeft=null, handsRight=null;
+const videoEl  =document.getElementById('video');
+const canvasEl =document.getElementById('canvas-overlay');
+const roiCanvas=document.getElementById('roi-canvas');
+const ctx      =canvasEl.getContext('2d');
+const roiCtx   =roiCanvas.getContext('2d');
+let gfL=0,gfR=0,frameCount=0;
+
+function framesNeeded(){return[1,2,3,5,7][cfg.sens-1];}
+
+function isVSign(lm){
+  const t=i=>lm[i],p=i=>lm[i-2];
+  return t(8).y<p(8).y && t(12).y<p(12).y
+      && t(16).y>p(16).y && t(20).y>p(20).y
+      && (Math.abs(t(8).x-t(12).x)>0.04||Math.abs(t(8).y-t(12).y)>0.04);
+}
+
+function initHands(cb){
+  const h=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+  h.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:0.15,minTrackingConfidence:0.15});
+  h.onResults(cb);
+  return h;
+}
+
+function onResultsLeft(results){
+  const detected=results.multiHandLandmarks?.length>0;
+  document.getElementById('badge-left').classList.toggle('active',detected);
+  if(!detected){gfL=Math.max(0,gfL-1);return;}
+  let found=false;
+  results.multiHandLandmarks.forEach(lm=>{if(isVSign(lm))found=true;});
+  if(found) gfL++; else gfL=Math.max(0,gfL-1);
+  if(gfL>=framesNeeded()&&!st.cdL){gfL=0;addPoint('left');}
+  drawLandmarksOnScreen(results,'left');
+}
+function onResultsRight(results){
+  const detected=results.multiHandLandmarks?.length>0;
+  document.getElementById('badge-right').classList.toggle('active',detected);
+  if(!detected){gfR=Math.max(0,gfR-1);return;}
+  let found=false;
+  results.multiHandLandmarks.forEach(lm=>{if(isVSign(lm))found=true;});
+  if(found) gfR++; else gfR=Math.max(0,gfR-1);
+  if(gfR>=framesNeeded()&&!st.cdR){gfR=0;addPoint('right');}
+  drawLandmarksOnScreen(results,'right');
+}
+
+function drawLandmarksOnScreen(results,side){
+  if(!results.multiHandLandmarks?.length) return;
+  const vw=videoEl.videoWidth||1280,vh=videoEl.videoHeight||720;
+  canvasEl.width=vw; canvasEl.height=vh;
+  const vRange=V_BOT-V_TOP; // 0.55
+  // raw video x range for this side
+  // left side = raw x: 2/3..1  |  right side = raw x: 0..1/3
+  const rawXStart = side==='left' ? 2/3 : 0;
+  const rawXRange = 1/3;
+  results.multiHandLandmarks.forEach(lm=>{
+    const mapped=lm.map(pt=>({
+      x: rawXStart + pt.x * rawXRange,
+      y: V_TOP + pt.y * vRange,
+      z: pt.z
+    }));
+    const color=side==='left'?'#f59e0b':'#60a5fa';
+    drawConnectors(ctx,mapped,HAND_CONNECTIONS,{color:color+'55',lineWidth:2});
+    drawLandmarks(ctx,mapped,{color,lineWidth:1,radius:3});
+  });
+}
+
+function extractROI(side){
+  const vw=videoEl.videoWidth,vh=videoEl.videoHeight;
+  if(!vw||!vh) return;
+  roiCanvas.width=ROI_W; roiCanvas.height=ROI_H;
+  // vertical crop
+  const srcY  = Math.round(vh*V_TOP);
+  const srcH  = Math.round(vh*(V_BOT-V_TOP));
+  // horizontal: left side = raw right 1/3, right side = raw left 1/3
+  const srcX  = side==='left' ? Math.round(vw*2/3) : 0;
+  const srcW  = Math.round(vw/3);
+  roiCtx.drawImage(videoEl, srcX, srcY, srcW, srcH, 0, 0, ROI_W, ROI_H);
+}
+
+async function processFrame(){
+  if(!videoEl.videoWidth) return;
+  frameCount++;
+  if(frameCount%2===0){
+    extractROI('left');
+    await handsLeft.send({image:roiCanvas});
+  } else {
+    extractROI('right');
+    await handsRight.send({image:roiCanvas});
+  }
+}
+
+function initCamera(){
+  handsLeft =initHands(onResultsLeft);
+  handsRight=initHands(onResultsRight);
+  mpCam=new Camera(videoEl,{
+    onFrame:processFrame,
+    width:1280,height:720,
+    facingMode:'user'
+  });
+  mpCam.start().then(()=>{
+    document.getElementById('cam-dot').classList.add('on');
+  }).catch(()=>{
+    document.getElementById('game-label').textContent='鏡頭存取失敗';
+  });
+}
+</script>
+</body>
+</html>
