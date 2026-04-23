@@ -113,7 +113,6 @@ html, body {
 .hud-btn.primary { background: #3b82f6; color: #fff; border-color: #3b82f6; }
 .hud-btn.primary:hover { background: #2563eb; }
 
-/* voice toggle */
 #voice-toggle {
   display: flex; align-items: center; gap: 0.35rem;
   padding: 0.2rem 0.65rem; border-radius: 0.4rem;
@@ -123,17 +122,8 @@ html, body {
   cursor: pointer; transition: all 0.15s; white-space: nowrap;
   user-select: none;
 }
-#voice-toggle.on {
-  border-color: #22c55e;
-  background: rgba(34,197,94,0.12);
-  color: #22c55e;
-}
-#voice-toggle:hover { background: rgba(255,255,255,0.12); }
-#voice-toggle.on:hover { background: rgba(34,197,94,0.2); }
-.voice-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: currentColor;
-}
+#voice-toggle.on { border-color: #22c55e; background: rgba(34,197,94,0.12); color: #22c55e; }
+.voice-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 #voice-toggle.on .voice-dot { animation: pulse 1.2s ease-in-out infinite; }
 
 #cam-dot {
@@ -147,15 +137,13 @@ html, body {
   position: fixed; bottom: 0.5rem; z-index: 25;
   font-size: 0.6rem; padding: 0.15rem 0.5rem;
   border-radius: 9999px; pointer-events: none;
-  background: rgba(0,0,0,0.6); border: 1px solid;
-  transition: all 0.2s;
+  background: rgba(0,0,0,0.6); border: 1px solid; transition: all 0.2s;
 }
 #badge-left  { left: 0.75rem;  color: #f59e0b; border-color: rgba(245,158,11,0.3); }
 #badge-right { right: 0.75rem; color: #60a5fa; border-color: rgba(96,165,250,0.3); }
 #badge-left.active  { background: rgba(245,158,11,0.2); border-color: #f59e0b; }
 #badge-right.active { background: rgba(96,165,250,0.2); border-color: #60a5fa; }
 
-/* Setup modal */
 #setup-modal {
   position: fixed; inset: 0; z-index: 100;
   background: rgba(0,0,0,0.92);
@@ -180,16 +168,11 @@ html, body {
 .slider-row input[type=range] { flex: 1; accent-color: #3b82f6; }
 .slider-val { font-size: 0.82rem; color: #8ba3c0; min-width: 2ch; }
 .modal-note { font-size: 0.68rem; color: #4a6480; }
-
-/* voice option in modal */
 .voice-option {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0.65rem 0.75rem;
-  border-radius: 0.5rem;
-  border: 1.5px solid #2d3f52;
-  background: #1e2d3d;
-  cursor: pointer;
-  transition: all 0.15s;
+  padding: 0.65rem 0.75rem; border-radius: 0.5rem;
+  border: 1.5px solid #2d3f52; background: #1e2d3d;
+  cursor: pointer; transition: all 0.15s;
 }
 .voice-option:hover { border-color: #3b82f6; }
 .voice-option.sel { border-color: #22c55e; background: rgba(34,197,94,0.08); }
@@ -197,25 +180,21 @@ html, body {
 .voice-option.sel .voice-option-label { color: #22c55e; }
 .voice-toggle-pill {
   width: 34px; height: 18px; border-radius: 9999px;
-  background: #2d3f52; position: relative; transition: background 0.2s;
-  flex-shrink: 0;
+  background: #2d3f52; position: relative; transition: background 0.2s; flex-shrink: 0;
 }
 .voice-option.sel .voice-toggle-pill { background: #22c55e; }
 .voice-toggle-pill::after {
   content: ''; position: absolute;
   width: 13px; height: 13px; border-radius: 50%;
-  background: #fff; top: 2.5px; left: 3px;
-  transition: transform 0.2s;
+  background: #fff; top: 2.5px; left: 3px; transition: transform 0.2s;
 }
 .voice-option.sel .voice-toggle-pill::after { transform: translateX(15px); }
-
 .start-btn {
   width: 100%; padding: 0.9rem; border-radius: 0.75rem;
   background: #3b82f6; color: #fff; font-size: 0.95rem; font-weight: 800; border: none; cursor: pointer;
 }
 .start-btn:hover { background: #2563eb; }
 
-/* Winner */
 #winner-overlay {
   position: fixed; inset: 0; z-index: 50;
   background: rgba(0,0,0,0.88);
@@ -326,9 +305,9 @@ html, body {
         <span class="voice-option-label">🔊 得分後自動播報比分（英文）</span>
         <div class="voice-toggle-pill"></div>
       </div>
-      <div class="modal-note" style="margin-top:.4rem">例：4:3 → "four three"　音量請用手機音量鍵控制</div>
+      <div class="modal-note" style="margin-top:.4rem">例：4:3 → "four three"　請確認響鈴撥片未靜音</div>
     </div>
-    <button class="start-btn" onclick="startGame()">📷 開啟鏡頭並開始</button>
+    <button class="start-btn" id="start-btn" onclick="startGame()">📷 開啟鏡頭並開始</button>
   </div>
 </div>
 
@@ -345,6 +324,33 @@ function newState(){
   return{ls:0,rs:0,lSets:0,rSets:0,set:1,serveLeft:true,history:[],cdL:false,cdR:false,over:false};
 }
 
+/* ── iOS AUDIO UNLOCK ──
+   Must be called inside a user-gesture handler (tap/click).
+   Resumes AudioContext + fires a silent SpeechSynthesisUtterance
+   to whitelist speechSynthesis for subsequent auto calls on iOS.
+*/
+let audioCtx = null;
+let speechUnlocked = false;
+
+function unlockAudio() {
+  // AudioContext unlock
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  // speechSynthesis unlock — fire a silent utterance during the tap
+  if (!speechUnlocked && window.speechSynthesis) {
+    const silent = new SpeechSynthesisUtterance(' ');
+    silent.volume = 0;
+    silent.lang = 'en-US';
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(silent);
+    speechUnlocked = true;
+  }
+}
+
 document.getElementById('sens-slider').addEventListener('input',function(){
   cfg.sens=+this.value;
   document.getElementById('sens-val').textContent=this.value;
@@ -357,18 +363,19 @@ function pick(el,group,val){
   if(group==='pts')  cfg.pts=+val;
 }
 
-/* ── VOICE ── */
 function toggleModalVoice(){
   cfg.voice=!cfg.voice;
   document.getElementById('modal-voice-toggle').classList.toggle('sel',cfg.voice);
-  syncVoiceToggleHUD();
+  syncVoiceHUD();
 }
 function toggleVoice(){
+  // toggling from HUD also counts as a user gesture → unlock
+  unlockAudio();
   cfg.voice=!cfg.voice;
   document.getElementById('modal-voice-toggle').classList.toggle('sel',cfg.voice);
-  syncVoiceToggleHUD();
+  syncVoiceHUD();
 }
-function syncVoiceToggleHUD(){
+function syncVoiceHUD(){
   const el=document.getElementById('voice-toggle');
   el.classList.toggle('on',cfg.voice);
   document.getElementById('voice-label').textContent=cfg.voice?'語音 ON':'語音 OFF';
@@ -377,25 +384,25 @@ function syncVoiceToggleHUD(){
 const ONES=['zero','one','two','three','four','five','six','seven','eight','nine',
             'ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen',
             'seventeen','eighteen','nineteen','twenty','twenty one'];
-function numToWord(n){ return ONES[n]||String(n); }
+function numWord(n){ return ONES[n]||String(n); }
 
 function speakScore(ls,rs){
-  if(!cfg.voice) return;
-  if(!window.speechSynthesis) return;
+  if(!cfg.voice||!window.speechSynthesis) return;
   window.speechSynthesis.cancel();
-  const text=`${numToWord(ls)} ${numToWord(rs)}`;
-  const utt=new SpeechSynthesisUtterance(text);
+  const utt=new SpeechSynthesisUtterance(`${numWord(ls)} ${numWord(rs)}`);
   utt.lang='en-US';
   utt.rate=1.0;
   utt.pitch=1.0;
+  utt.volume=1.0;
   window.speechSynthesis.speak(utt);
 }
 
-/* ── GAME ── */
 function startGame(){
+  // ← user gesture: unlock audio here
+  unlockAudio();
   st=newState();
   document.getElementById('setup-modal').style.display='none';
-  syncVoiceToggleHUD();
+  syncVoiceHUD();
   render();
   initCamera();
 }
@@ -411,7 +418,7 @@ function addPoint(side){
   animateScore(side);
   showHint(side);
   cooldown(side);
-  speakScore(st.ls, st.rs);
+  speakScore(st.ls,st.rs);
 }
 function checkSet(){
   const p=cfg.pts,need=WIN_SETS[cfg.maxSets];
@@ -431,6 +438,7 @@ function undoPoint(){
 }
 function resetGame(){
   window.speechSynthesis&&window.speechSynthesis.cancel();
+  speechUnlocked=false;
   document.getElementById('winner-overlay').classList.remove('show');
   st=newState();
   document.getElementById('setup-modal').style.display='flex';
