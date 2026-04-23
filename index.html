@@ -400,22 +400,14 @@ function numWord(n){ return ONES[n]||String(n); }
 
 function speakScore(ls,rs){
   if(!cfg.voice||!window.speechSynthesis) return;
+  // Must call speak() synchronously — any setTimeout breaks iOS gesture context
   window.speechSynthesis.cancel();
-  // iOS Safari needs a short pause after cancel() before speaking
-  setTimeout(() => {
-    const utt=new SpeechSynthesisUtterance(`${numWord(ls)} ${numWord(rs)}`);
-    utt.lang='en-US';
-    utt.rate=0.9;
-    utt.pitch=1.0;
-    utt.volume=1.0;
-    // iOS sometimes stalls — watchdog to kick it
-    utt.onstart = () => { clearTimeout(utt._watchdog); };
-    utt._watchdog = setTimeout(() => {
-      window.speechSynthesis.pause();
-      window.speechSynthesis.resume();
-    }, 1000);
-    window.speechSynthesis.speak(utt);
-  }, 50);
+  const utt=new SpeechSynthesisUtterance(`${numWord(ls)} ${numWord(rs)}`);
+  utt.lang='en-US';
+  utt.rate=0.9;
+  utt.pitch=1.0;
+  utt.volume=1.0;
+  window.speechSynthesis.speak(utt);
 }
 
 function startGame(){
