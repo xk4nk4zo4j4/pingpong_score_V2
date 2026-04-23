@@ -340,14 +340,26 @@ function unlockAudio() {
   if (audioCtx.state === 'suspended') {
     audioCtx.resume();
   }
-  // speechSynthesis unlock — fire a silent utterance during the tap
   if (!speechUnlocked && window.speechSynthesis) {
-    const silent = new SpeechSynthesisUtterance(' ');
-    silent.volume = 0;
-    silent.lang = 'en-US';
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(silent);
-    speechUnlocked = true;
+    // iOS requires voices to be loaded first
+    const doUnlock = () => {
+      const silent = new SpeechSynthesisUtterance(' ');
+      silent.volume = 0;
+      silent.lang = 'en-US';
+      silent.rate = 0.9;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(silent);
+      speechUnlocked = true;
+    };
+    // If voices already loaded, unlock immediately; otherwise wait
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      doUnlock();
+    } else {
+      window.speechSynthesis.addEventListener('voiceschanged', doUnlock, { once: true });
+      // Fallback: try anyway after 500ms in case voiceschanged never fires
+      setTimeout(() => { if (!speechUnlocked) doUnlock(); }, 500);
+    }
   }
 }
 
@@ -389,12 +401,21 @@ function numWord(n){ return ONES[n]||String(n); }
 function speakScore(ls,rs){
   if(!cfg.voice||!window.speechSynthesis) return;
   window.speechSynthesis.cancel();
-  const utt=new SpeechSynthesisUtterance(`${numWord(ls)} ${numWord(rs)}`);
-  utt.lang='en-US';
-  utt.rate=1.0;
-  utt.pitch=1.0;
-  utt.volume=1.0;
-  window.speechSynthesis.speak(utt);
+  // iOS Safari needs a short pause after cancel() before speaking
+  setTimeout(() => {
+    const utt=new SpeechSynthesisUtterance(`${numWord(ls)} ${numWord(rs)}`);
+    utt.lang='en-US';
+    utt.rate=0.9;
+    utt.pitch=1.0;
+    utt.volume=1.0;
+    // iOS sometimes stalls — watchdog to kick it
+    utt.onstart = () => { clearTimeout(utt._watchdog); };
+    utt._watchdog = setTimeout(() => {
+      window.speechSynthesis.pause();
+      window.speechSynthesis.resume();
+    }, 1000);
+    window.speechSynthesis.speak(utt);
+  }, 50);
 }
 
 function startGame(){
